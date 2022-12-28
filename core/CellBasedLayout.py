@@ -71,12 +71,12 @@ def create_cell_layout_4_layoutlm(bboxes, max_x, max_y, scale=0.01):
     :param bboxes: bounding boxes
     :param max_x: the maximum value of the x-coordinate
     :param max_y: the maximum value of the y-coordinate
-    :param scale: to control numbder of cells in a document.
+    :param scale: to control number of cells in a document.
                 use scale*max_x or scale*max_y as the threshold
     :return: return a bbox [x1, y1, x3, y3] and [row index, column index] for each cell
     """
 
-    # Use key point the calculate number of rows and columns
+    # Use key point to calculate number of rows and columns
     row_coos, col_coos = set(), set()
     bbox_of_cells = []
     index_of_cells = []
