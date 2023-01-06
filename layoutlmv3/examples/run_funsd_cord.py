@@ -168,7 +168,6 @@ def main():
     # See all possible arguments in layoutlmft/transformers/training_args.py
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
-
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
@@ -240,8 +239,6 @@ def main():
 
     remove_columns = column_names
 
-    # In the event the labels are not a `Sequence[ClassLabel]`, we will need to go through the dataset to get the
-    # unique labels.
     def get_label_list(labels):
         unique_labels = set()
         for label in labels:
@@ -283,37 +280,21 @@ def main():
         use_auth_token=True if model_args.use_auth_token else None,
     )
 
-    #     training_args.learning_rate = 1e-05
-    #     training_args.adafactor=False,
-    #     training_args.adam_beta1=0.9,
-    #     training_args.adam_beta2=0.999,
-    #     training_args.adam_epsilon=1e-08,
-    #     config.hidden_size = 1024
-    #     training_args.max_steps=20000
-
     config.default_cell_id = [255, 255]
-    config.default_scale = 0.01
-    config.cell_embedding_dim = 512
+    config.default_scale = 0.01  # parameter for generating cell-based layout
+    config.cell_embedding_dim = 512  # embedding dim of cells
 
     config.in_attn = False
-    config.norm_coor = False  # 让相邻的坐标使用相同的值，结果并没有太大的差别，暂时先放着
-    config.cell_emb = False  # 使用cell emb或者不使用
+    config.norm_coor = False  # use the same coordinates for similar x,y- coordinates
+    config.cell_emb = False  # use cell information as a new embedding
 
-    #     config.attention_type = "simple"  # 直接去掉，query，key, valude 的计算
+    #     config.attention_type = "simple"  # 直接去掉，query，key, value 的计算
     config.attention_type = "default"  # 默认的形式
 
-    config.pretrain_flag = True
+    config.pretrain_flag = True  # use the pre-trained model or not
 
-    #     PE_type: int = field(default=1)
-    #     sort_flag: bool = field(default=False)
-    #     sort_by: str = field(default="row")
-    #     MS: int = field(default=None)
-    #     DA: int = field(default=None)
-    #     word_embedding_size: int = field(default=512)
-    #     metric: int = field(default=2)
-
-    config.sort_by = data_args.sort_by
-    config.sort_flag = data_args.sort_flag
+    config.sort_by = data_args.sort_by  # sort cells by row/col or not
+    config.sort_flag = data_args.sort_flag  # "row" or "col"
 
     config.PE_type = data_args.PE_type
     #   1:  [x1,y1,x3,y3,h,w]
@@ -323,16 +304,16 @@ def main():
     #   5:  [x1,y1,x3,y3,row,col]
     #   6:  [x1,y1,x3,y3,h,w,row,col]  # row and col don't share weights with h and col
     #   7:  [x1,y1,h,w,row,col]
-    config.DA = data_args.DA
-    config.DA_eval = None
-    config.DA_level = 0.4
-    config.DA_bbox = False
-    config.MS = data_args.MS
-    config.word_embedding_size = data_args.word_embedding_size
+    config.DA = data_args.DA  # use the proposed data augmentation or not
+    config.DA_eval = None  # use data augmentation in evaluation dataset or not
+    config.DA_level = 0.4  # level of data augmentation
+    config.DA_bbox = False  # update bounding-box information with data augmentation
+    config.MS = data_args.MS  # use multi-scale layout
+    config.word_embedding_size = data_args.word_embedding_size  # embedding size of words in a input data of multi-scale layout
     config.metric = data_args.metric
     #     0 :default, based on word and token
     #     1 :only based on word
-    #     2 :only based on toekn
+    #     2 :only based on token
 
     if config.pretrain_flag:
         model = AutoModelForTokenClassification.from_pretrained(
@@ -391,7 +372,6 @@ def main():
 
         labels = []
         bboxes = []
-        cells = []
         images = []
 
         for batch_index in range(len(tokenized_inputs["input_ids"])):
@@ -404,7 +384,6 @@ def main():
             previous_word_idx = None
             label_ids = []
             bbox_inputs = []
-            cell_inputs = []
             if data_args.visual_embed:
                 ipath = examples["image_path"][org_batch_index]
                 img = pil_loader(ipath)  # load grey image and convert to RGB image
@@ -443,7 +422,6 @@ def main():
 
         tokenized_inputs["labels"] = labels
         tokenized_inputs["bbox"] = bboxes
-        #         tokenized_inputs["cell"] = cells
         if data_args.visual_embed:
             tokenized_inputs["images"] = images
         return tokenized_inputs
@@ -508,7 +486,6 @@ def main():
                 images.append(patch)
         tokenized_inputs["labels"] = labels
         tokenized_inputs["bbox"] = bboxes
-        #         tokenized_inputs["cell"] = cells
         if data_args.visual_embed:
             tokenized_inputs["images"] = images
 
@@ -556,10 +533,6 @@ def main():
             num_proc=data_args.preprocessing_num_workers,
             load_from_cache_file=not data_args.overwrite_cache,
         )
-    print("Num of train", len(datasets["train"]))  # 149
-    print("Num of test", len(datasets["test"]))  # 50
-    print("Num of train", len(train_dataset))  # 150
-    print("Num of test", len(eval_dataset))  # 54
 
     # Data collator
     data_collator = DataCollatorForKeyValueExtraction(
@@ -575,15 +548,16 @@ def main():
     def compute_metrics(p):
         predictions, labels = p
         predictions = np.argmax(predictions, axis=2)
-        #         predictions = predictions[:, :config.word_embedding_size]
-        #         labels = labels[:, :config.word_embedding_size]
+
         if config.MS is not None:
             if config.metric == 1:
                 predictions = predictions[:, :config.word_embedding_size]
                 labels = labels[:, :config.word_embedding_size]
-            else:
+            elif config.metric == 2:
                 predictions = predictions[:, config.word_embedding_size:512]
                 labels = labels[:, config.word_embedding_size:512]
+            elif config.metric == 0:
+                pass
 
         # Remove ignored index (special tokens)
         true_predictions = [
